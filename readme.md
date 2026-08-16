@@ -9,13 +9,21 @@ included.
 
 ## Install
 
-Download the packaged skill from the latest release:
+Download the packaged skill from the latest release with the GitHub CLI:
+
+```bash
+gh release download --repo tuomashatakka/delegate-local-skill --pattern '*.skill'
+unzip delegate-local.skill -d ~/.claude/skills/
+chmod +x ~/.claude/skills/delegate-local/scripts/*
+```
+
+While this repository is private, that authenticated path is the only one that works. If it
+is ever made public, the release asset also becomes reachable at a stable unauthenticated
+URL:
 
 ```bash
 curl -fsSL -o delegate-local.skill \
   https://github.com/tuomashatakka/delegate-local-skill/releases/latest/download/delegate-local.skill
-unzip delegate-local.skill -d ~/.claude/skills/
-chmod +x ~/.claude/skills/delegate-local/scripts/*
 ```
 
 The `chmod` is a safety net — `unzip` restores the executable bit on most platforms, but
