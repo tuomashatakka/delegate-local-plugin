@@ -1,0 +1,241 @@
+#!/usr/bin/env python3
+"""Turn an opencode `run --format json` NDJSON stream into one structured result.
+
+Usage: _events.py <run_dir>
+
+Reads the run directory written by delegate.sh and prints a single JSON object.
+Tolerates a truncated final line, which is normal when a run is killed by the
+watchdog or cancelled mid-stream.
+"""
+
+import json
+import os
+import re
+import sys
+import time
+
+RESULT_RE = re.compile(r"<result>(.*?)</result>", re.DOTALL | re.IGNORECASE)
+TERMINAL = {"done", "error", "timeout", "cancelled"}
+MAX_TOOL_INPUT = 400
+
+
+def read_text(path, default=""):
+    try:
+        with open(path) as fh:
+            return fh.read().strip()
+    except OSError:
+        return default
+
+
+def read_json(path, default=None):
+    try:
+        with open(path) as fh:
+            return json.load(fh)
+    except (OSError, ValueError):
+        return default
+
+
+def parse_events(path):
+    """NDJSON -> list of dicts. A partial trailing line is dropped, not fatal."""
+    events = []
+    try:
+        with open(path, errors="replace") as fh:
+            for line in fh:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    events.append(json.loads(line))
+                except ValueError:
+                    continue
+    except OSError:
+        pass
+    return events
+
+
+def pid_alive(pid):
+    try:
+        os.kill(int(pid), 0)
+        return True
+    except (OSError, ValueError, TypeError):
+        return False
+
+
+def truncate(value):
+    try:
+        blob = json.dumps(value, ensure_ascii=False)
+    except (TypeError, ValueError):
+        blob = str(value)
+    return blob if len(blob) <= MAX_TOOL_INPUT else blob[:MAX_TOOL_INPUT] + "…"
+
+
+def error_message(err):
+    """opencode nests the useful string at error.data.message; fall back gracefully."""
+    if not isinstance(err, dict):
+        return str(err)
+    data = err.get("data")
+    if isinstance(data, dict) and data.get("message"):
+        return str(data["message"])
+    return str(err.get("name") or err)
+
+
+def collect(events):
+    texts, tools, errors = [], [], []
+    tokens = {"input": 0, "output": 0, "reasoning": 0, "total": 0}
+    cache = {"read": 0, "write": 0}
+    cost = 0.0
+    steps = 0
+    session_id = None
+    first_ts = last_ts = None
+
+    for ev in events:
+        ts = ev.get("timestamp")
+        if isinstance(ts, (int, float)):
+            first_ts = ts if first_ts is None else min(first_ts, ts)
+            last_ts = ts if last_ts is None else max(last_ts, ts)
+        session_id = session_id or ev.get("sessionID")
+
+        etype = ev.get("type")
+        part = ev.get("part") or {}
+
+        if etype == "text":
+            text = (part.get("text") or "").strip()
+            if text:
+                texts.append(text)
+        elif etype == "tool_use":
+            state = part.get("state") or {}
+            entry = {
+                "tool": part.get("tool"),
+                "status": state.get("status"),
+                "title": state.get("title"),
+            }
+            if state.get("input") is not None:
+                entry["input"] = truncate(state["input"])
+            if state.get("error"):
+                entry["error"] = str(state["error"])
+            tools.append(entry)
+        elif etype == "step_finish":
+            steps += 1
+            tk = part.get("tokens") or {}
+            for key in ("input", "output", "reasoning", "total"):
+                if isinstance(tk.get(key), (int, float)):
+                    tokens[key] += tk[key]
+            ck = tk.get("cache") or {}
+            for key in ("read", "write"):
+                if isinstance(ck.get(key), (int, float)):
+                    cache[key] += ck[key]
+            if isinstance(part.get("cost"), (int, float)):
+                cost += part["cost"]
+        elif etype == "error":
+            errors.append(error_message(ev.get("error")))
+
+    tokens["cache"] = cache
+    return {
+        "session_id": session_id,
+        "texts": texts,
+        "tool_calls": tools,
+        "errors": errors,
+        "tokens": tokens,
+        "cost": cost,
+        "steps": steps,
+        "first_ts": first_ts,
+        "last_ts": last_ts,
+    }
+
+
+def extract_result(texts):
+    """Small local models follow output contracts unreliably, so degrade in stages.
+
+    1. an explicit <result> block anywhere (the fast path the brief asks for)
+    2. otherwise the last completed text part (usually the final answer)
+    3. otherwise nothing — text_all still preserves whatever was produced
+    """
+    for text in reversed(texts):
+        match = RESULT_RE.search(text)
+        if match:
+            return match.group(1).strip(), "result_block"
+    if texts:
+        return texts[-1], "last_text"
+    return None, "none"
+
+
+def derive_status(run_dir, exit_code, has_errors):
+    recorded = read_text(os.path.join(run_dir, "status"))
+    if recorded in TERMINAL:
+        return recorded
+    runner_pid = read_text(os.path.join(run_dir, "runner.pid"))
+    if runner_pid and pid_alive(runner_pid):
+        return "running"
+    if recorded == "running":
+        # runner died without recording a terminal state
+        return "error" if (exit_code not in (0, None) or has_errors) else "done"
+    return recorded or "unknown"
+
+
+def elapsed(run_dir, meta, agg, status):
+    """Prefer the event span; fall back to the exit-code stamp so a run that
+    produced no events at all (killed by the watchdog, say) still reports how
+    long it actually ran rather than how long ago it was started."""
+    if agg["first_ts"] and agg["last_ts"] and agg["last_ts"] > agg["first_ts"]:
+        return round((agg["last_ts"] - agg["first_ts"]) / 1000.0, 1)
+    started = meta.get("started_at_epoch")
+    if not started:
+        return None
+    if status in TERMINAL:
+        try:
+            return round(os.path.getmtime(os.path.join(run_dir, "exit_code")) - started, 1)
+        except OSError:
+            pass
+    return round(time.time() - started, 1)
+
+
+def main():
+    if len(sys.argv) != 2:
+        print("usage: _events.py <run_dir>", file=sys.stderr)
+        return 2
+    run_dir = sys.argv[1]
+    if not os.path.isdir(run_dir):
+        print(json.dumps({"error": "run not found", "run_dir": run_dir}))
+        return 1
+
+    meta = read_json(os.path.join(run_dir, "meta.json"), {}) or {}
+    raw_exit = read_text(os.path.join(run_dir, "exit_code"))
+    exit_code = int(raw_exit) if raw_exit.lstrip("-").isdigit() else None
+
+    events = parse_events(os.path.join(run_dir, "events.ndjson"))
+    agg = collect(events)
+    status = derive_status(run_dir, exit_code, bool(agg["errors"]))
+    result, source = extract_result(agg["texts"])
+
+    duration = elapsed(run_dir, meta, agg, status)
+
+    stderr_tail = read_text(os.path.join(run_dir, "stderr.log"))[-1000:]
+
+    out = {
+        "run_id": meta.get("run_id") or os.path.basename(run_dir),
+        "session_id": agg["session_id"] or meta.get("session_id"),
+        "parent_run_id": meta.get("parent_run_id"),
+        "status": status,
+        "exit_code": exit_code,
+        "result": result,
+        "result_source": source,
+        "text_all": "\n\n".join(agg["texts"]) or None,
+        "tool_calls": agg["tool_calls"],
+        "tokens": agg["tokens"],
+        "cost": agg["cost"],
+        "steps": agg["steps"],
+        "errors": agg["errors"],
+        "duration_s": duration,
+        "dir": meta.get("dir"),
+        "title": meta.get("title"),
+        "run_dir": run_dir,
+    }
+    if stderr_tail and status in {"error", "timeout"}:
+        out["stderr_tail"] = stderr_tail
+
+    print(json.dumps(out, ensure_ascii=False, indent=2))
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
