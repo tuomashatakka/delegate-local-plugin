@@ -1,0 +1,120 @@
+name: Publish skill
+
+# Packages skill/ into delegate-local.skill and attaches it to a GitHub release
+# whenever main changes. Each run cuts its own tagged release, so history is
+# preserved while the newest one stays reachable at the stable URL:
+#
+#   https://github.com/tuomashatakka/delegate-local-skill/releases/latest/download/delegate-local.skill
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'skill/**'
+      - 'scripts/package_skill.py'
+      - '.github/workflows/publish-skill.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: publish-skill
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate skill
+        run: python scripts/package_skill.py skill --check
+
+      - name: Verify scripts are executable
+        # Git tracks the executable bit, but a bad merge or a Windows checkout can
+        # drop it. The skill is script-driven, so a non-executable script ships a
+        # broken package that only fails at first use.
+        run: |
+          missing=$(find skill/scripts -type f ! -perm -u+x -print)
+          if [ -n "$missing" ]; then
+            echo "::error::not executable:"; echo "$missing"; exit 1
+          fi
+          echo "all scripts executable"
+
+      - name: Shell and Python syntax check
+        run: |
+          bash -n skill/scripts/delegate.sh
+          python -m py_compile skill/scripts/_events.py
+          echo "syntax OK"
+
+      - name: Package
+        run: python scripts/package_skill.py skill --output dist
+
+      - name: Verify archive layout
+        # The archive must unpack as delegate-local/, not as the source folder
+        # name (skill/). Getting this wrong installs the skill under the wrong
+        # name and is invisible until someone tries to use it.
+        run: |
+          python - <<'PY'
+          import sys, zipfile
+          with zipfile.ZipFile("dist/delegate-local.skill") as zf:
+              names = zf.namelist()
+          roots = {n.split("/")[0] for n in names}
+          if roots != {"delegate-local"}:
+              sys.exit(f"unexpected archive root(s): {sorted(roots)}")
+          required = {"delegate-local/SKILL.md",
+                      "delegate-local/scripts/delegate.sh",
+                      "delegate-local/scripts/_events.py"}
+          if missing := required - set(names):
+              sys.exit(f"missing from archive: {sorted(missing)}")
+          print(f"archive OK — {len(names)} entries under delegate-local/")
+          PY
+
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: delegate-local-skill
+          path: dist/delegate-local.skill
+          if-no-files-found: error
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          tag="v${{ github.run_number }}"
+          short="${GITHUB_SHA::7}"
+          notes="$(cat <<EOF
+          Packaged from \`$short\` — $(git log -1 --pretty=%s)
+
+          **Install**
+
+          \`\`\`bash
+          curl -fsSL -o delegate-local.skill \\
+            https://github.com/${{ github.repository }}/releases/latest/download/delegate-local.skill
+          unzip delegate-local.skill -d ~/.claude/skills/
+          chmod +x ~/.claude/skills/delegate-local/scripts/*
+          \`\`\`
+
+          \`unzip\` restores the executable bit on most platforms, but the Python
+          \`zipfile.extractall\` API and some GUI extractors do not — hence the
+          \`chmod\`, since this skill runs from its scripts.
+          EOF
+          )"
+
+          # Re-running a workflow reuses its run number, so the tag may already
+          # exist. Update that release in place rather than failing the job.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" dist/delegate-local.skill --clobber
+            gh release edit "$tag" --title "delegate-local $tag ($short)" --notes "$notes"
+          else
+            gh release create "$tag" dist/delegate-local.skill \
+              --title "delegate-local $tag ($short)" \
+              --target "$GITHUB_SHA" \
+              --notes "$notes"
+          fi
