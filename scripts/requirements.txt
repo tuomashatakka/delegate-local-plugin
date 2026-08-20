@@ -1,2 +1,2 @@
 # Page generator only — not needed to use the plugin.
-markdown==3.7
+markdown>=3.8.1,<4
