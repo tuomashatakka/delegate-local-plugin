@@ -39,8 +39,13 @@ jobs:
         # Git tracks the executable bit, but a bad merge or a Windows checkout can
         # drop it. Everything here runs from these files, so a missing bit ships a
         # broken plugin that only fails at first use.
+        #
+        # __pycache__ is excluded because the py_compile step above generates it in
+        # the workspace: bytecode is never executable, so without this the check
+        # fails on a file CI created itself.
         run: |
-          missing=$(find skills/delegate-local/scripts bin -type f ! -perm -u+x -print)
+          missing=$(find skills/delegate-local/scripts bin -type f \
+                      ! -path '*/__pycache__/*' ! -perm -u+x -print)
           if [ -n "$missing" ]; then
             echo "::error::not executable:"; echo "$missing"; exit 1
           fi

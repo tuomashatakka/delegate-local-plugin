@@ -12,7 +12,7 @@ verdict line and an answer.
 ## Install
 
 ```
-/plugin marketplace add tuomashatakka/delegate-local-skill
+/plugin marketplace add tuomashatakka/delegate-local-plugin
 /plugin install delegate-local@tuomashatakka-tools
 ```
 
