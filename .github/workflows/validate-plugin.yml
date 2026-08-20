@@ -1,9 +1,12 @@
 name: Validate plugin
 
-# The plugin installs straight from git, so there is no artifact to build — this
-# workflow is the entire test surface. It checks the two things that actually
+# The plugin installs straight from git, so there is no package to build — the
+# validate job is the entire test surface. It checks the two things that actually
 # break a plugin in the field: malformed component frontmatter, and scripts that
 # are unparseable or not executable.
+#
+# The page jobs regenerate public/index.html from readme.md and publish it to
+# GitHub Pages, so the site can never drift from the README it is built out of.
 
 on:
   push:
@@ -72,3 +75,61 @@ jobs:
           # so the plugin manifest and its components need their own invocation.
           claude plugin validate . --strict
           claude plugin validate ./.claude-plugin/plugin.json --strict
+
+  build-page:
+    # Only on main: a PR must not rewrite the committed page or publish a site.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: validate
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build the page from readme.md
+        run: |
+          pip install -r scripts/requirements.txt
+          python scripts/build_page.py
+
+      - name: Commit the page when it changed
+        # The generator is deterministic, so a diff here means readme.md or the
+        # manifest actually moved. Pushes made with GITHUB_TOKEN do not trigger
+        # workflows, so this cannot loop back into another run.
+        run: |
+          if git diff --quiet -- public/index.html; then
+            echo "page unchanged"
+            exit 0
+          fi
+          git config user.name  "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add public/index.html
+          git commit -m "Rebuild public/index.html from readme.md"
+          git push
+          echo "page committed"
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: public
+
+  deploy-page:
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: build-page
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    # Pages deployments must not cancel each other mid-flight, so this job opts
+    # out of the workflow-level cancel-in-progress.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - uses: actions/deploy-pages@v4
+        id: deployment

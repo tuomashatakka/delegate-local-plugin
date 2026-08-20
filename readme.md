@@ -109,3 +109,20 @@ python3 -m py_compile skills/delegate-local/scripts/_events.py
 
 CI runs the same checks on every push. There is no release artifact — plugins install
 straight from git.
+
+### The public page
+
+<https://tuomashatakka.github.io/delegate-local-plugin/> is generated from this file.
+`scripts/build_page.py` turns the `#` heading and the prose above the first `##` into a
+hero, each `##` section into a page section, and reads the title, version and blurb from
+`plugin.json` so the manifest stays the single source of truth. Output is deterministic,
+which is what lets CI commit it back only when it genuinely changed.
+
+```bash
+python3 -m venv .venv && .venv/bin/pip install -r scripts/requirements.txt
+.venv/bin/python scripts/build_page.py            # write public/index.html
+.venv/bin/python scripts/build_page.py --check    # exit 1 if stale
+```
+
+Editing `public/index.html` by hand is pointless — the next push to `main` overwrites it.
+Change `readme.md` instead.

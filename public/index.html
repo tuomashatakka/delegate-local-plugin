@@ -1,0 +1,219 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>delegate-local — Run scoped tasks on a local opencode runtime as background subagents.</title>
+<meta name="description" content="Run scoped tasks on a local opencode runtime as background subagents.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 16 16'%3E%3Crect width='16' height='16' rx='3' fill='%232752e7'/%3E%3Cpath d='M4 5l3 3-3 3M8.5 11h4' stroke='white' stroke-width='1.6' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+<style>
+:root{
+  color-scheme:light dark;
+  --ink:#161616; --ink-soft:#3f3f3f; --ink-faint:#6b6b6b;
+  --line:#e6e6e6; --wash:#f6f6f6; --paper:#fff; --accent:#2752e7;
+  --font-sans:system-ui,-apple-system,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+  --font-mono:ui-monospace,SFMono-Regular,"SF Mono",Menlo,Consolas,monospace;
+  --text-xs:.75rem; --text-sm:.875rem; --text-md:1rem;
+  --text-lg:1.175rem; --text-xl:1.35rem; --text-2x:2.35rem;
+  --space-md:1.5rem; --space-lg:3rem; --space-xl:5.5rem;
+  --measure:38em; --page-max:47.5rem; --snap:.2s cubic-bezier(.4,0,.2,1);
+}
+@media (prefers-color-scheme:dark){:root{
+  --ink:#ededed; --ink-soft:#c9c9c9; --ink-faint:#9a9a9a;
+  --line:#242424; --wash:#161616; --paper:#0e0e0e; --accent:#7aa2ff;
+}}
+*{box-sizing:border-box}
+html{-webkit-text-size-adjust:100%}
+body{background:var(--paper);color:var(--ink);
+     font:400 var(--text-md)/1.65 var(--font-sans);
+     -webkit-font-smoothing:antialiased;margin:0}
+.wrap{max-width:var(--page-max);padding-inline:var(--space-md);margin-inline:auto}
+a{color:var(--accent);text-decoration:none}
+a:hover{text-decoration:underline}
+code,pre{font-family:var(--font-mono);font-size:.875em}
+code{background:var(--wash);border-radius:3px;padding:.1em .35em}
+pre{background:var(--wash);border:1px solid var(--line);border-radius:6px;
+    padding:1rem 1.125rem;line-height:1.5;overflow-x:auto}
+pre code{background:0 0;padding:0}
+header.hero{padding:var(--space-xl) 0 var(--space-lg);border-block-end:1px solid var(--line)}
+header.hero .eyebrow{font:600 var(--text-xs)/1 var(--font-mono);letter-spacing:.14em;
+    text-transform:uppercase;color:var(--ink-faint);margin-block-end:1.25rem}
+header.hero h1{font-size:var(--text-2x);letter-spacing:-.02em;margin:0 0 1rem;
+    font-weight:650;line-height:1.12}
+header.hero .lede{font-size:var(--text-lg);color:var(--ink-faint);
+    max-width:var(--measure);margin:0 0 1rem}
+header.hero p{max-width:var(--measure);color:var(--ink-faint);margin:0 0 1rem}
+header.hero .cta{flex-wrap:wrap;gap:.625rem;display:flex;margin-block-start:1.75rem}
+a.btn{border:1px solid var(--line);color:var(--ink);
+    transition:border-color var(--snap),background var(--snap),opacity var(--snap);
+    border-radius:6px;padding:.5625rem 1rem;font-size:.95rem;font-weight:550;display:inline-block}
+a.btn:hover{border-color:var(--ink);text-decoration:none}
+a.btn.primary{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+a.btn.primary:hover{opacity:.88}
+section{padding:var(--space-lg) 0;border-block-end:1px solid var(--line)}
+section h2{font-size:var(--text-xl);letter-spacing:-.01em;margin:0 0 1.125rem;font-weight:600}
+section h3{font-size:var(--text-md);margin:1.75rem 0 .375rem;font-weight:600}
+section p{margin:0 0 1rem}
+section ul,section ol{margin:0 0 1rem;padding-inline-start:1.25rem}
+section li{margin-block-end:.35rem}
+section blockquote{margin:0 0 1rem;padding-inline-start:1rem;
+    border-inline-start:2px solid var(--line);color:var(--ink-faint)}
+section:last-of-type{border-block-end:none}
+.muted{color:var(--ink-faint)}
+table{border-collapse:collapse;width:100%;margin:0 0 1rem;font-size:.95rem;display:block;overflow-x:auto}
+th,td{text-align:start;padding:.7rem .9rem .7rem 0;border-block-end:1px solid var(--line);vertical-align:top}
+th{font-weight:600;font-size:var(--text-xs);letter-spacing:.08em;text-transform:uppercase;
+   color:var(--ink-faint);border-block-end-color:var(--ink-faint)}
+td{color:var(--ink-faint)}
+td:first-child{color:var(--ink);white-space:nowrap}
+footer{padding:var(--space-lg) 0 4.5rem;color:var(--ink-faint);font-size:.9rem}
+footer a{color:var(--ink-faint);text-decoration:underline}
+footer a:hover{color:var(--ink)}
+</style>
+</head>
+<body>
+<main class="wrap">
+
+  <header class="hero">
+    <div class="eyebrow">delegate-local &middot; v1.0.0</div>
+    <h1>Run scoped tasks on a local opencode runtime as background subagents.</h1>
+    <p class="lede">A Claude Code <strong>plugin</strong> that wraps a locally installed <a href="https://opencode.ai">opencode</a>
+runtime as a background subagent. Send a self-contained task brief, get a handle back
+immediately, and collect a compact structured result later. Multi-turn continuation and
+parallel fan-out included.</p>
+<p>The point is context, not convenience: the spawn/poll loop, the raw NDJSON event stream and
+the full result JSON all stay inside the runner subagent. The main conversation sees a
+verdict line and an answer.</p>
+    <div class="cta">
+      <a class="btn primary" href="https://github.com/tuomashatakka/delegate-local-plugin">View on GitHub</a>
+      <a class="btn" href="https://github.com/tuomashatakka/delegate-local-plugin/blob/main/skills/delegate-local/SKILL.md">Protocol reference</a>
+      <a class="btn" href="https://opencode.ai">opencode</a>
+    </div>
+  </header>
+
+  <section>
+    <h2>Install</h2>
+<pre><code>/plugin marketplace add tuomashatakka/delegate-local-plugin
+/plugin install delegate-local@tuomashatakka-tools
+</code></pre>
+<p>If the install summary says <code>Run /reload-plugins to activate.</code>, do that.</p>
+<p>For local development, add the working copy as a marketplace:</p>
+<pre><code>/plugin marketplace add /path/to/delegate-local
+</code></pre>
+<p>Installed plugins are <strong>copied</strong> into a version-pinned cache
+(<code>~/.claude/plugins/cache/&lt;marketplace&gt;/&lt;plugin&gt;/&lt;version&gt;/</code>), and
+<code>/plugin marketplace update</code> does not refresh a copy that is already there. To pick up local
+edits, either bump <code>version</code> in <code>plugin.json</code> or reinstall:</p>
+<pre><code>claude plugin uninstall delegate-local
+claude plugin install delegate-local@tuomashatakka-tools
+</code></pre>
+<p>Requires <code>opencode</code>, <code>jq</code> and <code>python3</code> on <code>PATH</code>. Run <code>/delegate-local:delegations</code> (or
+<code>delegate-local doctor</code>) to check the runtime.</p>
+<h3>Permissions</h3>
+<p>The runner works in the background, where a permission prompt stalls the whole run. Allowlist
+the shim once, in <code>~/.claude/settings.json</code> or the project's <code>.claude/settings.json</code>:</p>
+<pre><code class="language-json">{ &quot;permissions&quot;: { &quot;allow&quot;: [&quot;Bash(delegate-local:*)&quot;] } }
+</code></pre>
+<p>Plugin subagents cannot set <code>permissionMode</code> themselves — this rule is the supported way to
+grant it, and the <code>bin/</code> shim exists so that one stable pattern covers every subcommand.</p>
+  </section>
+  <section>
+    <h2>What it ships</h2>
+<table>
+<thead>
+<tr>
+<th>Component</th>
+<th>Name</th>
+<th>Role</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Agent</td>
+<td><code>delegate-local:runner</code></td>
+<td>Executes one brief: spawn, wait, report. Background, <code>haiku</code>, <code>Bash</code> only.</td>
+</tr>
+<tr>
+<td>Skill</td>
+<td><code>delegate-local</code></td>
+<td>When delegating is worth it, how to write the brief, how to read the result.</td>
+</tr>
+<tr>
+<td>Command</td>
+<td><code>/delegate-local:delegate</code></td>
+<td>Compose a brief for a task and hand it to the runner.</td>
+</tr>
+<tr>
+<td>Command</td>
+<td><code>/delegate-local:delegations</code></td>
+<td>In-flight runs and runtime health.</td>
+</tr>
+<tr>
+<td>Binary</td>
+<td><code>delegate-local</code></td>
+<td>The protocol CLI, on the Bash tool's <code>PATH</code>.</td>
+</tr>
+</tbody>
+</table>
+<p>The runner is deliberately a dumb pipe — it does not author briefs and does not retry on
+failure. Both of those need context it doesn't have, so they stay with the caller.</p>
+  </section>
+  <section>
+    <h2>Usage</h2>
+<pre><code>/delegate-local:delegate --dir src/api  add docstrings to every exported function
+</code></pre>
+<p>Or drive the CLI directly for management operations:</p>
+<pre><code class="language-bash">delegate-local list                  # recent runs, status, lineage
+delegate-local logs --stderr &lt;id&gt;    # warnings that never reach the result
+delegate-local cancel &lt;id&gt;
+delegate-local doctor                # live round-trip against the configured default
+</code></pre>
+<p>Subcommands: <code>spawn</code>, <code>status</code>, <code>result</code>, <code>wait</code>, <code>send</code>, <code>list</code>, <code>cancel</code>, <code>logs</code>, <code>doctor</code>.</p>
+<p>See <a href="skills/delegate-local/SKILL.md"><code>skills/delegate-local/SKILL.md</code></a> for the full protocol
+and <a href="skills/delegate-local/references/opencode-cli.md"><code>skills/delegate-local/references/opencode-cli.md</code></a>
+for the reverse-engineered <code>opencode run</code> flag and event-stream contract.</p>
+  </section>
+  <section>
+    <h2>Layout</h2>
+<pre><code>.claude-plugin/
+  plugin.json                 manifest
+  marketplace.json            the repo is its own marketplace
+agents/runner.md              → delegate-local:runner
+commands/                     → /delegate-local:delegate, /delegate-local:delegations
+bin/delegate-local            shim onto the Bash tool's PATH
+skills/delegate-local/
+  SKILL.md
+  scripts/delegate.sh         the protocol, single entry point
+  scripts/_events.py          NDJSON event stream -&gt; structured result
+  references/opencode-cli.md
+</code></pre>
+  </section>
+  <section>
+    <h2>Development</h2>
+<pre><code class="language-bash">claude plugin validate . --strict
+bash -n skills/delegate-local/scripts/delegate.sh bin/delegate-local
+python3 -m py_compile skills/delegate-local/scripts/_events.py
+</code></pre>
+<p>CI runs the same checks on every push. There is no release artifact — plugins install
+straight from git.</p>
+<h3>The public page</h3>
+<p><a href="https://tuomashatakka.github.io/delegate-local-plugin/">https://tuomashatakka.github.io/delegate-local-plugin/</a> is generated from this file.
+<code>scripts/build_page.py</code> turns the <code>#</code> heading and the prose above the first <code>##</code> into a
+hero, each <code>##</code> section into a page section, and reads the title, version and blurb from
+<code>plugin.json</code> so the manifest stays the single source of truth. Output is deterministic,
+which is what lets CI commit it back only when it genuinely changed.</p>
+<pre><code class="language-bash">python3 -m venv .venv &amp;&amp; .venv/bin/pip install -r scripts/requirements.txt
+.venv/bin/python scripts/build_page.py            # write public/index.html
+.venv/bin/python scripts/build_page.py --check    # exit 1 if stale
+</code></pre>
+<p>Editing <code>public/index.html</code> by hand is pointless — the next push to <code>main</code> overwrites it.
+Change <code>readme.md</code> instead.</p>
+  </section>
+
+  <footer>
+    <p><a href="https://github.com/tuomashatakka/delegate-local-plugin">github.com/tuomashatakka/delegate-local-plugin</a> &middot; MIT licensed</p>
+  </footer>
+
+</main>
+</body>
+</html>
