@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Exposes the delegation protocol as `delegate-local <subcommand>` — the plugin
+# loader puts bin/ on the Bash tool's PATH, which gives users a single stable
+# permission rule to allowlist instead of a plugin-cache-dependent absolute path.
+#
+# Resolves relative to this file, not to ${CLAUDE_PLUGIN_ROOT}: that variable is
+# interpolated into skill/agent *content*, but is not exported into the shell,
+# and installed plugins live in a cache directory whose path is not knowable here.
+exec "$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)/skills/delegate-local/scripts/delegate.sh" "$@"

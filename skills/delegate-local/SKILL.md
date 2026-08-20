@@ -1,6 +1,6 @@
 ---
 name: delegate-local
-description: Delegate scoped tasks to a local opencode runtime as background subagents, using a spawn/poll/collect protocol over `opencode run --format json`. Use this whenever the user wants to offload, delegate, hand off, farm out, or background a task; run something with opencode or a local model (Ollama, Apple Foundation Model, LM Studio); fan work out across several files or directories in parallel; keep bulk grunt work out of the main context window; or asks "can another agent do this", "run this in the background", "spin up a local agent", or "use opencode for this". Also use when the user wants to check on, resume, or collect results from delegations already in flight.
+description: Delegate scoped tasks to a local opencode runtime as background subagents, using a spawn/poll/collect protocol over `opencode run --format json`. Use this whenever the user wants to offload, delegate, hand off, farm out, or background a task; run something with opencode or a local model (Ollama, Apple Foundation Model, LM Studio); fan work out across several files or directories in parallel; keep bulk grunt work out of the main context window; or asks "can another agent do this", "run this in the background", "spin up a local agent", or "use opencode for this". Also use when the user wants to check on, resume, or collect results from delegations already in flight. Covers when delegating is worth it, how to write the brief, and how to read the result; the `delegate-local:runner` agent is what actually executes one.
 ---
 
 # Delegating to a local opencode runtime
@@ -11,11 +11,24 @@ immediately, and collect a structured result later — the same shape as spawnin
 subagent, except the work happens in a separate process against whatever model the user's
 opencode is configured with.
 
-Everything goes through one script. All output is JSON on stdout.
+## Two ways in
+
+**To run a delegation, spawn the `delegate-local:runner` agent** with a finished brief and a
+`--dir`. It does the spawn, the blocking wait and the result projection inside its own
+context, then reports back a verdict line plus the delegate's answer — the poll loop and the
+raw event stream never reach you. It runs in the background, so the handle comes back
+immediately. Fan out by spawning one runner per directory.
+
+**Drive the CLI directly** for what the runner deliberately doesn't do: seeing what's in
+flight, cancelling, and debugging. It is on `PATH` as `delegate-local`, and every subcommand
+prints exactly one JSON document on stdout.
 
 ```
-scripts/delegate.sh <spawn|status|result|wait|send|list|cancel|logs|doctor>
+delegate-local <spawn|status|result|wait|send|list|cancel|logs|doctor>
 ```
+
+The protocol below is what the runner executes. Read it when you're driving by hand, or
+working out why a run behaved the way it did.
 
 ## Decide whether to delegate at all
 
@@ -42,33 +55,33 @@ back-and-forth judgment belong with you.
 
 ```bash
 # 1. spawn — returns instantly with a handle
-delegate.sh spawn --dir src/api "…task brief…"
+delegate-local spawn --dir src/api "…task brief…"
 # → {"run_id":"oc_20260816T180911_6745","status":"running","dir":"…","run_dir":"…"}
 
 # 2. poll — cheap, no parsing of the event stream
-delegate.sh status oc_20260816T180911_6745
+delegate-local status oc_20260816T180911_6745
 # → {"run_id":"…","status":"running","terminal":false,"session_id":"ses_…"}
 
 # 3. collect — blocks until terminal, then prints the structured result
-delegate.sh wait oc_20260816T180911_6745
+delegate-local wait oc_20260816T180911_6745
 ```
 
-Run ids are timestamped and any unambiguous prefix works, so `delegate.sh status oc_2026081
+Run ids are timestamped and any unambiguous prefix works, so `delegate-local status oc_2026081
 6T1809` resolves fine when you're poking at things by hand.
 
 `wait` is the join primitive and takes several ids at once, which is how fan-out works:
 
 ```bash
-a=$(delegate.sh spawn --dir src/api "…" | jq -r .run_id)
-b=$(delegate.sh spawn --dir src/web "…" | jq -r .run_id)
-c=$(delegate.sh spawn --dir src/cli "…" | jq -r .run_id)
-delegate.sh wait "$a" "$b" "$c"      # → JSON array of three results
+a=$(delegate-local spawn --dir src/api "…" | jq -r .run_id)
+b=$(delegate-local spawn --dir src/web "…" | jq -r .run_id)
+c=$(delegate-local spawn --dir src/cli "…" | jq -r .run_id)
+delegate-local wait "$a" "$b" "$c"      # → JSON array of three results
 ```
 
 Give each parallel delegate its **own `--dir`** when you can. They run concurrently with
 `--auto`, so two agents editing the same tree will happily clobber each other.
 
-`delegate.sh wait --all` joins everything currently in flight, and `delegate.sh list` shows
+`delegate-local wait --all` joins everything currently in flight, and `delegate-local list` shows
 recent runs with their status and lineage.
 
 ### Continuing a conversation
@@ -77,7 +90,7 @@ recent runs with their status and lineage.
 a subagent that's already loaded the context:
 
 ```bash
-delegate.sh send <run_id> "That missed the error path in parse(). Handle it and re-report."
+delegate-local send <run_id> "That missed the error path in parse(). Handle it and re-report."
 ```
 
 It reuses the parent's `--dir`, `--agent` and `--model`, records `parent_run_id`, and gets
@@ -119,8 +132,8 @@ short verdict, a filename, or a list, the difference is real.
 Pass long briefs by file or stdin rather than as an argument — no quoting to get wrong:
 
 ```bash
-delegate.sh spawn --dir src --prompt-file /tmp/brief.md
-cat brief.md | delegate.sh spawn --dir src
+delegate-local spawn --dir src --prompt-file /tmp/brief.md
+cat brief.md | delegate-local spawn --dir src
 ```
 
 ## Reading the result
@@ -152,7 +165,7 @@ That failure is common with small local models and it looks like success from th
 specifies a default, and silently overriding it substitutes your judgment for theirs.
 
 Pass `--model` when the user asks for a specific model, or when you're deliberately routing
-cheap bulk work to a small local one (`ollama/…`) to save cost. `delegate.sh doctor` lists
+cheap bulk work to a small local one (`ollama/…`) to save cost. `delegate-local doctor` lists
 what's reachable.
 
 `--agent` works the same way — forward it only when the user names an agent. One sharp
@@ -189,7 +202,7 @@ wrapper leaves an orphan reparented to init.
 **Errors.** `errors[]` carries anything opencode reported as a session error, and `status`
 is `error` whenever the exit code is non-zero or an error event appeared. Note that some
 models on the hosted `opencode/*` provider are billing-gated and fail with a 401 that shows
-up here — that's a per-model condition, not a broken install. `delegate.sh doctor` does a
+up here — that's a per-model condition, not a broken install. `delegate-local doctor` does a
 live round-trip against the configured default to tell you which situation you're in.
 
 **Debugging.** `logs --events <id>` is the raw NDJSON, `logs --stderr <id>` catches

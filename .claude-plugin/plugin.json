@@ -1,0 +1,10 @@
+{
+  "name": "delegate-local",
+  "displayName": "Delegate Local",
+  "version": "1.0.0",
+  "description": "Run scoped tasks on a local opencode runtime as background subagents.",
+  "author": { "name": "Tuomas Hatakka" },
+  "repository": "https://github.com/tuomashatakka/delegate-local-skill",
+  "license": "MIT",
+  "keywords": ["opencode", "subagent", "delegation", "local-llm", "background"]
+}

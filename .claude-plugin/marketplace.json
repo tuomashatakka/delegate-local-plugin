@@ -1,0 +1,22 @@
+{
+  "name": "tuomashatakka-tools",
+  "owner": {
+    "name": "Tuomas Hatakka",
+    "url": "https://github.com/tuomashatakka"
+  },
+  "description": "Local-first agent tooling: delegate scoped work to an opencode runtime running on your own machine.",
+  "plugins": [
+    {
+      "name": "delegate-local",
+      "source": "./",
+      "description": "Run scoped tasks on a local opencode runtime as background subagents.",
+      "category": "workflow",
+      "tags": [
+        "opencode",
+        "subagent",
+        "delegation",
+        "local-llm"
+      ]
+    }
+  ]
+}

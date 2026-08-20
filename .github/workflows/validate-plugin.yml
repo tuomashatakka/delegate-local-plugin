@@ -1,0 +1,69 @@
+name: Validate plugin
+
+# The plugin installs straight from git, so there is no artifact to build — this
+# workflow is the entire test surface. It checks the two things that actually
+# break a plugin in the field: malformed component frontmatter, and scripts that
+# are unparseable or not executable.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-plugin-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Shell and Python syntax
+        run: |
+          bash -n skills/delegate-local/scripts/delegate.sh
+          bash -n bin/delegate-local
+          python -m py_compile skills/delegate-local/scripts/_events.py
+          echo "syntax OK"
+
+      - name: Scripts are executable
+        # Git tracks the executable bit, but a bad merge or a Windows checkout can
+        # drop it. Everything here runs from these files, so a missing bit ships a
+        # broken plugin that only fails at first use.
+        run: |
+          missing=$(find skills/delegate-local/scripts bin -type f ! -perm -u+x -print)
+          if [ -n "$missing" ]; then
+            echo "::error::not executable:"; echo "$missing"; exit 1
+          fi
+          echo "all scripts executable"
+
+      - name: JSON manifests parse
+        run: |
+          python -c "import json;json.load(open('.claude-plugin/plugin.json'))"
+          python -c "import json;json.load(open('.claude-plugin/marketplace.json'))"
+          echo "manifests OK"
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: claude plugin validate
+        # The native validator is the authoritative check on manifest schema and on
+        # the frontmatter of every skill, agent and command. It is the only step
+        # here that needs the network, so it runs last: if it ever proves flaky,
+        # the offline steps above still cover the real breakage modes.
+        run: |
+          npm install -g @anthropic-ai/claude-code
+          # `validate .` resolves to the marketplace manifest when one is present,
+          # so the plugin manifest and its components need their own invocation.
+          claude plugin validate . --strict
+          claude plugin validate ./.claude-plugin/plugin.json --strict
