@@ -75,15 +75,15 @@ footer a:hover{color:var(--ink)}
 <main class="wrap">
 
   <header class="hero">
-    <div class="eyebrow">delegate-local &middot; v1.0.0</div>
+    <div class="eyebrow">delegate-local &middot; v1.1.0</div>
     <h1>Run scoped tasks on a local opencode runtime as background subagents.</h1>
     <p class="lede">A Claude Code <strong>plugin</strong> that wraps a locally installed <a href="https://opencode.ai">opencode</a>
 runtime as a background subagent. Send a self-contained task brief, get a handle back
 immediately, and collect a compact structured result later. Multi-turn continuation and
 parallel fan-out included.</p>
-<p>The point is context, not convenience: the spawn/poll loop, the raw NDJSON event stream and
-the full result JSON all stay inside the runner subagent. The main conversation sees a
-verdict line and an answer.</p>
+<p>The point is context, not convenience: the runner receives a compact live stream of
+opencode's completed text/tool/error events, while the raw NDJSON and full result JSON stay
+inside it. The main conversation sees a verdict line and an answer.</p>
     <div class="cta">
       <a class="btn primary" href="https://github.com/tuomashatakka/delegate-local-plugin">View on GitHub</a>
       <a class="btn" href="https://github.com/tuomashatakka/delegate-local-plugin/blob/main/skills/delegate-local/SKILL.md">Protocol reference</a>
@@ -116,6 +116,11 @@ the shim once, in <code>~/.claude/settings.json</code> or the project's <code>.c
 </code></pre>
 <p>Plugin subagents cannot set <code>permissionMode</code> themselves — this rule is the supported way to
 grant it, and the <code>bin/</code> shim exists so that one stable pattern covers every subcommand.</p>
+<p>The runner also declares the direct <code>opencode run --format json --auto</code> command as a
+<code>UserPromptSubmit</code> hook in its frontmatter. Claude Code currently ignores frontmatter hooks
+for plugin-scoped subagents, so the streamed <code>delegate-local</code> command path remains the
+runtime implementation when installed as a plugin. The hook becomes active if the agent is
+copied to project or user scope, where Claude supports subagent frontmatter hooks.</p>
   </section>
   <section>
     <h2>What it ships</h2>
@@ -131,7 +136,7 @@ grant it, and the <code>bin/</code> shim exists so that one stable pattern cover
 <tr>
 <td>Agent</td>
 <td><code>delegate-local:runner</code></td>
-<td>Executes one brief: spawn, wait, report. Background, <code>haiku</code>, <code>Bash</code> only.</td>
+<td>Executes one brief: spawn, stream, report. Background, <code>haiku</code>, <code>Bash</code> only.</td>
 </tr>
 <tr>
 <td>Skill</td>
@@ -168,7 +173,7 @@ delegate-local logs --stderr &lt;id&gt;    # warnings that never reach the resul
 delegate-local cancel &lt;id&gt;
 delegate-local doctor                # live round-trip against the configured default
 </code></pre>
-<p>Subcommands: <code>spawn</code>, <code>status</code>, <code>result</code>, <code>wait</code>, <code>send</code>, <code>list</code>, <code>cancel</code>, <code>logs</code>, <code>doctor</code>.</p>
+<p>Subcommands: <code>spawn</code>, <code>status</code>, <code>stream</code>, <code>result</code>, <code>wait</code>, <code>send</code>, <code>list</code>, <code>cancel</code>, <code>logs</code>, <code>doctor</code>.</p>
 <p>See <a href="skills/delegate-local/SKILL.md"><code>skills/delegate-local/SKILL.md</code></a> for the full protocol
 and <a href="skills/delegate-local/references/opencode-cli.md"><code>skills/delegate-local/references/opencode-cli.md</code></a>
 for the reverse-engineered <code>opencode run</code> flag and event-stream contract.</p>
@@ -193,6 +198,7 @@ skills/delegate-local/
 <pre><code class="language-bash">claude plugin validate . --strict
 bash -n skills/delegate-local/scripts/delegate.sh bin/delegate-local
 python3 -m py_compile skills/delegate-local/scripts/_events.py
+python3 -m unittest discover -s tests -v
 </code></pre>
 <p>CI runs the same checks on every push. There is no release artifact — plugins install
 straight from git.</p>

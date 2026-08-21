@@ -38,6 +38,9 @@ jobs:
           python -m py_compile skills/delegate-local/scripts/_events.py
           echo "syntax OK"
 
+      - name: Stream protocol tests
+        run: python -m unittest discover -s tests -v
+
       - name: Scripts are executable
         # Git tracks the executable bit, but a bad merge or a Windows checkout can
         # drop it. Everything here runs from these files, so a missing bit ships a

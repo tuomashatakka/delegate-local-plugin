@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Turn an opencode `run --format json` NDJSON stream into one structured result.
 
-Usage: _events.py <run_dir>
+Usage: _events.py [--stream] <run_dir>
 
 Reads the run directory written by delegate.sh and prints a single JSON object.
 Tolerates a truncated final line, which is normal when a run is killed by the
@@ -17,6 +17,7 @@ import time
 RESULT_RE = re.compile(r"<result>(.*?)</result>", re.DOTALL | re.IGNORECASE)
 TERMINAL = {"done", "error", "timeout", "cancelled"}
 MAX_TOOL_INPUT = 400
+STREAM_POLL_SECONDS = 0.1
 
 
 def read_text(path, default=""):
@@ -77,6 +78,84 @@ def error_message(err):
     if isinstance(data, dict) and data.get("message"):
         return str(data["message"])
     return str(err.get("name") or err)
+
+
+def project_event(event):
+    """Reduce a raw opencode event to the communication a supervisor needs.
+
+    opencode emits completed parts rather than token deltas. Keeping this
+    projection small lets a supervising subagent observe progress without
+    absorbing metadata-heavy tool inputs and outputs into its context.
+    """
+    event_type = event.get("type")
+    part = event.get("part") or {}
+    projected = {"event": event_type}
+
+    if event_type in {"text", "reasoning"}:
+        text = (part.get("text") or "").strip()
+        if not text:
+            return None
+        projected["text"] = text
+    elif event_type == "tool_use":
+        state = part.get("state") or {}
+        projected.update(
+            {
+                "tool": part.get("tool"),
+                "status": state.get("status"),
+                "title": state.get("title"),
+            }
+        )
+        if state.get("error"):
+            projected["error"] = str(state["error"])
+    elif event_type == "error":
+        projected["message"] = error_message(event.get("error"))
+    elif event_type == "step_finish":
+        projected["reason"] = part.get("reason")
+        projected["tokens"] = part.get("tokens") or {}
+    else:
+        return None
+
+    if event.get("sessionID"):
+        projected["session_id"] = event["sessionID"]
+    return projected
+
+
+def stream_events(run_dir):
+    """Follow a live run and flush compact NDJSON events as they complete."""
+    events_path = os.path.join(run_dir, "events.ndjson")
+    while not os.path.exists(events_path):
+        if read_text(os.path.join(run_dir, "status")) in TERMINAL:
+            break
+        time.sleep(STREAM_POLL_SECONDS)
+
+    try:
+        with open(events_path, errors="replace") as events_file:
+            while True:
+                line_start = events_file.tell()
+                line = events_file.readline()
+                if line:
+                    status = read_text(os.path.join(run_dir, "status"))
+                    if not line.endswith("\n") and status not in TERMINAL:
+                        events_file.seek(line_start)
+                        time.sleep(STREAM_POLL_SECONDS)
+                        continue
+                    try:
+                        event = json.loads(line)
+                    except ValueError:
+                        continue
+                    projected = project_event(event)
+                    if projected:
+                        print(json.dumps(projected, ensure_ascii=False), flush=True)
+                    continue
+
+                status = read_text(os.path.join(run_dir, "status"))
+                if status in TERMINAL:
+                    print(json.dumps({"event": "terminal", "status": status}), flush=True)
+                    return 0
+                time.sleep(STREAM_POLL_SECONDS)
+    except OSError as exc:
+        print(json.dumps({"event": "stream_error", "message": str(exc)}), flush=True)
+        return 1
 
 
 def collect(events):
@@ -190,13 +269,17 @@ def elapsed(run_dir, meta, agg, status):
 
 
 def main():
-    if len(sys.argv) != 2:
-        print("usage: _events.py <run_dir>", file=sys.stderr)
+    stream = len(sys.argv) == 3 and sys.argv[1] == "--stream"
+    if len(sys.argv) != (3 if stream else 2):
+        print("usage: _events.py [--stream] <run_dir>", file=sys.stderr)
         return 2
-    run_dir = sys.argv[1]
+    run_dir = sys.argv[2] if stream else sys.argv[1]
     if not os.path.isdir(run_dir):
         print(json.dumps({"error": "run not found", "run_dir": run_dir}))
         return 1
+
+    if stream:
+        return stream_events(run_dir)
 
     meta = read_json(os.path.join(run_dir, "meta.json"), {}) or {}
     raw_exit = read_text(os.path.join(run_dir, "exit_code"))

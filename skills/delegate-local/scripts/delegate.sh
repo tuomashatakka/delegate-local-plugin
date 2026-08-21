@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # delegate.sh — spawn/poll/collect protocol over a local `opencode` runtime.
 #
-# Every subcommand prints exactly one JSON document to stdout so callers can
-# parse it deterministically. Diagnostics go to stderr.
+# Management subcommands print exactly one JSON document to stdout so callers
+# can parse them deterministically. `stream` is the deliberate exception: it
+# emits compact NDJSON events until the run becomes terminal. Diagnostics go to
+# stderr.
 #
 #   spawn   start a detached delegation, print a handle, return immediately
 #   status  cheap terminal-or-not check
+#   stream  follow compact opencode events until terminal
 #   result  structured result JSON
 #   wait    poll until terminal, then print result(s)  (the join primitive)
 #   send    follow-up turn on the same opencode session
@@ -86,6 +89,7 @@ session_of() {
 }
 
 emit_result() { python3 "$EVENTS_PY" "$1"; }
+emit_stream() { python3 -u "$EVENTS_PY" --stream "$1"; }
 
 # ---------------------------------------------------------------------------
 # spawn
@@ -269,8 +273,13 @@ cmd_exec() {
 }
 
 # ---------------------------------------------------------------------------
-# status / result / wait / list / cancel / logs / send
+# status / stream / result / wait / list / cancel / logs / send
 # ---------------------------------------------------------------------------
+
+cmd_stream() {
+  [ $# -eq 1 ] || die "usage: delegate.sh stream <run_id>"
+  emit_stream "$(resolve_run "$1")"
+}
 
 cmd_status() {
   local ids=() all=0
@@ -510,6 +519,7 @@ mkdir -p "$RUNS" 2>/dev/null
 case "${1:-}" in
   spawn)   shift; cmd_spawn "$@" ;;
   status)  shift; cmd_status "$@" ;;
+  stream)  shift; cmd_stream "$@" ;;
   result)  shift; cmd_result "$@" ;;
   wait)    shift; cmd_wait "$@" ;;
   send)    shift; cmd_send "$@" ;;

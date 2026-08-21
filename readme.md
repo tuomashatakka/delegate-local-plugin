@@ -5,9 +5,9 @@ runtime as a background subagent. Send a self-contained task brief, get a handle
 immediately, and collect a compact structured result later. Multi-turn continuation and
 parallel fan-out included.
 
-The point is context, not convenience: the spawn/poll loop, the raw NDJSON event stream and
-the full result JSON all stay inside the runner subagent. The main conversation sees a
-verdict line and an answer.
+The point is context, not convenience: the runner receives a compact live stream of
+opencode's completed text/tool/error events, while the raw NDJSON and full result JSON stay
+inside it. The main conversation sees a verdict line and an answer.
 
 ## Install
 
@@ -49,11 +49,17 @@ the shim once, in `~/.claude/settings.json` or the project's `.claude/settings.j
 Plugin subagents cannot set `permissionMode` themselves — this rule is the supported way to
 grant it, and the `bin/` shim exists so that one stable pattern covers every subcommand.
 
+The runner also declares the direct `opencode run --format json --auto` command as a
+`UserPromptSubmit` hook in its frontmatter. Claude Code currently ignores frontmatter hooks
+for plugin-scoped subagents, so the streamed `delegate-local` command path remains the
+runtime implementation when installed as a plugin. The hook becomes active if the agent is
+copied to project or user scope, where Claude supports subagent frontmatter hooks.
+
 ## What it ships
 
 | Component | Name | Role |
 | --- | --- | --- |
-| Agent | `delegate-local:runner` | Executes one brief: spawn, wait, report. Background, `haiku`, `Bash` only. |
+| Agent | `delegate-local:runner` | Executes one brief: spawn, stream, report. Background, `haiku`, `Bash` only. |
 | Skill | `delegate-local` | When delegating is worth it, how to write the brief, how to read the result. |
 | Command | `/delegate-local:delegate` | Compose a brief for a task and hand it to the runner. |
 | Command | `/delegate-local:delegations` | In-flight runs and runtime health. |
@@ -77,7 +83,7 @@ delegate-local cancel <id>
 delegate-local doctor                # live round-trip against the configured default
 ```
 
-Subcommands: `spawn`, `status`, `result`, `wait`, `send`, `list`, `cancel`, `logs`, `doctor`.
+Subcommands: `spawn`, `status`, `stream`, `result`, `wait`, `send`, `list`, `cancel`, `logs`, `doctor`.
 
 See [`skills/delegate-local/SKILL.md`](skills/delegate-local/SKILL.md) for the full protocol
 and [`skills/delegate-local/references/opencode-cli.md`](skills/delegate-local/references/opencode-cli.md)
@@ -105,6 +111,7 @@ skills/delegate-local/
 claude plugin validate . --strict
 bash -n skills/delegate-local/scripts/delegate.sh bin/delegate-local
 python3 -m py_compile skills/delegate-local/scripts/_events.py
+python3 -m unittest discover -s tests -v
 ```
 
 CI runs the same checks on every push. There is no release artifact — plugins install

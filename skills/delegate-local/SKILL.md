@@ -14,17 +14,18 @@ opencode is configured with.
 ## Two ways in
 
 **To run a delegation, spawn the `delegate-local:runner` agent** with a finished brief and a
-`--dir`. It does the spawn, the blocking wait and the result projection inside its own
-context, then reports back a verdict line plus the delegate's answer — the poll loop and the
-raw event stream never reach you. It runs in the background, so the handle comes back
-immediately. Fan out by spawning one runner per directory.
+`--dir`. It does the spawn, follows a compact live stream of completed text/tool/error events
+inside its own context, and reports back a verdict line plus the delegate's answer — the poll
+loop and raw event stream never reach you. It runs in the background, so the handle comes
+back immediately. Fan out by spawning one runner per directory.
 
 **Drive the CLI directly** for what the runner deliberately doesn't do: seeing what's in
-flight, cancelling, and debugging. It is on `PATH` as `delegate-local`, and every subcommand
-prints exactly one JSON document on stdout.
+flight, cancelling, and debugging. It is on `PATH` as `delegate-local`. Management
+subcommands print one JSON document on stdout; `stream` emits compact NDJSON until terminal
+state.
 
 ```
-delegate-local <spawn|status|result|wait|send|list|cancel|logs|doctor>
+delegate-local <spawn|status|stream|result|wait|send|list|cancel|logs|doctor>
 ```
 
 The protocol below is what the runner executes. Read it when you're driving by hand, or
@@ -62,9 +63,17 @@ delegate-local spawn --dir src/api "…task brief…"
 delegate-local status oc_20260816T180911_6745
 # → {"run_id":"…","status":"running","terminal":false,"session_id":"ses_…"}
 
-# 3. collect — blocks until terminal, then prints the structured result
+# 3. observe — blocks until terminal, streaming compact events as NDJSON
+delegate-local stream oc_20260816T180911_6745
+
+# 4. collect — prints the structured terminal result
 delegate-local wait oc_20260816T180911_6745
 ```
+
+`stream` is the runner-facing path. It emits each completed text, reasoning, tool, step and
+error event immediately, omitting large tool inputs/outputs, then ends with a `terminal`
+event. OpenCode's JSON protocol has no token-delta event, so this is event streaming rather
+than character-by-character text streaming.
 
 Run ids are timestamped and any unambiguous prefix works, so `delegate-local status oc_2026081
 6T1809` resolves fine when you're poking at things by hand.
